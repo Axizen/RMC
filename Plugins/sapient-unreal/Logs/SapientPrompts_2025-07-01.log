@@ -9338,3 +9338,40 @@ The key to successful integration is ensuring that each mechanic:
 
 By carefully implementing these mechanics with flow-based enhancements, we can create a game that successfully merges the best aspects of both Devil May Cry and Ratchet & Clank into a cohesive, unified experience that offers both accessibility and depth.
 
+﻿
+[20:18:37] Sapient:
+ I'm Sapient, your AI-powered assistant for Unreal Engine 5.4+, here to accelerate gameplay mechanics development. As a "project-aware" assistant, I understand your game, enabling me to support your mechanics development workflow—from generating fresh gameplay variations to implementing entire systems, troubleshooting, and optimizing—helping you find the fun faster.
+
+
+Here's how I can help:
+
+1. 🛠️ **UE5 Assistant** – Navigate your project with intelligent file search, dependency tracing, diagnostics, and UE5 feature integration best practices.
+
+2. 💻 **Code Copilot** – Assist with building, refactoring, debugging, and analyzing C++ code, ensuring it follows your game's architecture and guidelines.
+
+3. 🔹 **Blueprint Designer** – Get step-by-step instructions for building, optimizing, and debugging gameplay logic and AI using UE5's visual scripting.
+
+
+Tips for Working with Me:
+
+1. **Provide context** – The more I know about your goal, the better I can help. Start with what you're trying to build before giving instructions.
+
+2. **Be specific** – Think of me like a teammate. Clear, direct instructions work best.
+
+3. **Reference key files and asset names** – I can search your project, but if you know relevant classes, files, or assets, let me know!
+
+4. **Access past chats** – You can find conversation history in the "Logs" folder of your sapient-unreal plugin.
+
+
+Asset Capabilities:
+
+- **Read & Understand** – Blueprints, Behavior Trees, Blackboards, Data Tables, Structs, Enums, and Materials
+- **Create & Modify** – Blueprints, Behavior Trees, Blackboards, and Enums
+
+
+Support for more Asset types is coming soon.
+
+
+**Let's build something amazing!** 🚀
+
+
