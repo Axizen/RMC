@@ -12,3 +12,7 @@ Saved
 *.suo
 *.xcodeproj
 *.xcworkspace
+/Content
+/Content/StarterContent
+/Plugins/sapient-unreal
+/Plugins/sapient-unreal
