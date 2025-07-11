@@ -1,236 +1,250 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Logging/LogMacros.h"
-#include "Core/GameEventSystem.h"
+#include "Components/Movement/RMCMovementComponent.h"
 #include "RMCCharacter.generated.h"
 
-class USpringArmComponent;
-class UCameraComponent;
-class UInputMappingContext;
-class UInputAction;
-class URiftComponent;
-class UWeaponManagerComponent;
-class UStyleComponent;
-class UMomentumComponent;
-class UWallRunComponent;
-class UComponentLocator;
-class UGameEventSubsystem;
-class UInputHandlerComponent;
-class ARiftAnchor;
-struct FInputActionValue;
-
-DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
-
-UCLASS(config=Game)
-class ARMCCharacter : public ACharacter
+UCLASS(Blueprintable, BlueprintType, meta=(ShortTooltip="Character class with momentum-based movement system."))
+class RMC_API ARMCCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
-	/** Camera boom positioning the camera behind the character */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-	USpringArmComponent* CameraBoom;
-
-	/** Follow camera */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-	UCameraComponent* FollowCamera;
-	
-	/** Component Locator */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core", meta = (AllowPrivateAccess = "true"))
-	UComponentLocator* ComponentLocator;
-
-	/** Input Handler Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core", meta = (AllowPrivateAccess = "true"))
-	UInputHandlerComponent* InputHandler;
-
-	/** Rift Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rift", meta = (AllowPrivateAccess = "true"))
-	URiftComponent* RiftComponent;
-
-	/** Weapon Manager Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-	UWeaponManagerComponent* WeaponManager;
-
-	/** Style Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", meta = (AllowPrivateAccess = "true"))
-	UStyleComponent* StyleComponent;
-
-	/** Momentum Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-	UMomentumComponent* MomentumComponent;
-
-	/** Wall Run Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-	UWallRunComponent* WallRunComponent;
-
-	/** Double Jump Component */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
-	class UDoubleJumpComponent* DoubleJumpComponent;
-
-	/** Normal gameplay input context */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	UInputMappingContext* NormalGameplayContext;
-
-	/** Combat input context */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	UInputMappingContext* CombatContext;
-
-	/** Rifting input context */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	UInputMappingContext* RiftingContext;
-
-	/** Wall running input context */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	UInputMappingContext* WallRunningContext;
-
-	/** Menu input context */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	UInputMappingContext* MenuContext;
-
 public:
-	ARMCCharacter();
-	
-	/** Returns CameraBoom subobject **/
-	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
-	/** Returns FollowCamera subobject **/
-	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
-	/** Returns ComponentLocator subobject **/
-	FORCEINLINE class UComponentLocator* GetComponentLocator() const { return ComponentLocator; }
-	/** Returns InputHandler subobject **/
-	FORCEINLINE class UInputHandlerComponent* GetInputHandler() const { return InputHandler; }
-	/** Returns RiftComponent subobject **/
-	FORCEINLINE class URiftComponent* GetRiftComponent() const { return RiftComponent; }
-	/** Returns WeaponManager subobject **/
-	FORCEINLINE class UWeaponManagerComponent* GetWeaponManager() const { return WeaponManager; }
-	/** Returns StyleComponent subobject **/
-	FORCEINLINE class UStyleComponent* GetStyleComponent() const { return StyleComponent; }
-	/** Returns MomentumComponent subobject **/
-	FORCEINLINE class UMomentumComponent* GetMomentumComponent() const { return MomentumComponent; }
-	/** Returns WallRunComponent subobject **/
-	FORCEINLINE class UWallRunComponent* GetWallRunComponent() const { return WallRunComponent; }
-	/** Returns DoubleJumpComponent subobject **/
-	FORCEINLINE class UDoubleJumpComponent* GetDoubleJumpComponent() const { return DoubleJumpComponent; }
+	// Sets default values for this character's properties
+	ARMCCharacter(const FObjectInitializer& ObjectInitializer);
 
-	/** Add style points from a specific move */
-	UFUNCTION(BlueprintCallable, Category = "Combat|Style")
-	void AddStylePoints(float Points, FName MoveName);
+	// Called every frame
+	virtual void Tick(float DeltaTime) override;
 
-	/** Handle taking damage and update style accordingly */
-	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
-
-	/** Called when the game ends */
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-protected:
-	/** Input action for double jump */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	UInputAction* DoubleJumpAction;
-
-	/** Called for movement input */
-	UFUNCTION()
-	void OnMoveInput(const FGameEventData& EventData);
-
-	/** Called for looking input */
-	UFUNCTION()
-	void OnLookInput(const FGameEventData& EventData);
-
-	/** Called for jump input */
-	UFUNCTION()
-	void OnJumpInput(const FGameEventData& EventData);
-
-	/** Called for phantom dodge input */
-	UFUNCTION()
-	void OnPhantomDodgeInput(const FGameEventData& EventData);
-
-	/** Called for rift tether input */
-	UFUNCTION()
-	void OnRiftTetherInput(const FGameEventData& EventData);
-
-	/** Called for weapon fire input */
-	UFUNCTION()
-	void OnFireInput(const FGameEventData& EventData);
-
-	/** Called for weapon alt fire input */
-	UFUNCTION()
-	void OnAltFireInput(const FGameEventData& EventData);
-
-	/** Called when releasing alt fire input */
-	UFUNCTION()
-	void OnReleaseChargeInput(const FGameEventData& EventData);
-
-	/** Called for weapon reload input */
-	UFUNCTION()
-	void OnReloadInput(const FGameEventData& EventData);
-
-	/** Called for weapon switch input */
-	UFUNCTION()
-	void OnWeaponSwitchInput(const FGameEventData& EventData);
-
-	/** Called for wall run input */
-	UFUNCTION()
-	void OnWallRunInput(const FGameEventData& EventData);
-
-	/** Called for wall jump input */
-	UFUNCTION()
-	void OnWallJumpInput(const FGameEventData& EventData);
-
-	/** Called for double jump input */
-	UFUNCTION()
-	void TryDoubleJump(const FInputActionValue& Value);
-
-	/** Find the best rift anchor in range */
-	ARiftAnchor* FindBestRiftAnchor() const;
-
-	// APawn interface
+	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	
-	// To add mapping context
+
+	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-	/** Default weapons to equip */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	TArray<TSubclassOf<class URangedWeaponBase>> DefaultWeapons;
+	// Returns the custom movement component
+	URMCMovementComponent* GetRMCMovementComponent() const;
 
-	// Event system reference
-	UGameEventSubsystem* EventSystem;
+	// Returns Camera Boom
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+	class USpringArmComponent* CameraBoom;
 
-	// Event listener handles
-	TArray<FDelegateHandle> EventListenerHandles;
+	// Returns Follow Camera
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+	class UCameraComponent* FollowCamera;
 
-	// Event handlers for gameplay events
+	// Camera settings
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float BaseTurnRate;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float BaseLookUpRate;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float WallRunCameraTilt;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float WallRunCameraTiltSpeed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float SlideCameraLowerOffset;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+	float SlideCameraSpeed;
+
+	// Animation properties
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Animation)
+	bool bIsWallRunningLeft;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Animation)
+	bool bIsWallRunningRight;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Animation)
+	bool bRotateRootBoneWithController;
+
+	// Movement Input Functions
+	/** Called for forwards/backward input */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void MoveForward(float Value);
+
+	/** Called for side to side input */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void MoveRight(float Value);
+
+	/** Called for looking up/down input */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void LookUp(float Value);
+
+	/** Called for turning input */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void Turn(float Value);
+
+	/** Called via input to turn at a given rate */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void TurnAtRate(float Rate);
+
+	/** Called via input to look up/down at a given rate */
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	void LookUpAtRate(float Rate);
+
+	// Momentum-based movement actions
+	/** Initiates a jump or double jump if in air */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void OnJumpActionPressed();
+
+	/** Ends jump action */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void OnJumpActionReleased();
+
+	/** Initiates a dash in the current movement direction */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void OnDashActionPressed();
+
+	/** Initiates a slide if moving and on ground */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void OnSlideActionPressed();
+
+	/** Ends slide action */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void OnSlideActionReleased();
+
+	/** Attempts to start wall running */
+	UFUNCTION(BlueprintCallable, Category = "Movement|Actions")
+	virtual void TryWallRun();
+
+	// Blueprint native events for animation and effects
+	/** Called when character starts wall running */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character starts wall running"))
+	void OnWallRunBegin(const FVector& WallNormal);
+	virtual void OnWallRunBegin_Implementation(const FVector& WallNormal);
+
+	/** Called when character stops wall running */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character stops wall running"))
+	void OnWallRunEnd();
+	virtual void OnWallRunEnd_Implementation();
+
+	/** Called when character starts sliding */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character starts sliding"))
+	void OnSlideBegin();
+	virtual void OnSlideBegin_Implementation();
+
+	/** Called when character stops sliding */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character stops sliding"))
+	void OnSlideEnd();
+	virtual void OnSlideEnd_Implementation();
+
+	/** Called when character performs a dash */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character performs a dash"))
+	void OnDashBegin(const FVector& DashDirection);
+	virtual void OnDashBegin_Implementation(const FVector& DashDirection);
+
+	/** Called when character finishes a dash */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character finishes a dash"))
+	void OnDashEnd();
+	virtual void OnDashEnd_Implementation();
+
+	/** Called when character performs a double jump */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when character performs a double jump"))
+	void OnDoubleJump();
+	virtual void OnDoubleJump_Implementation();
+
+	/** Called when momentum changes */
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement|Events", meta = (ToolTip = "Called when momentum changes"))
+	void OnMomentumChanged(float NewMomentum);
+	virtual void OnMomentumChanged_Implementation(float NewMomentum);
+
+	// Debug helper functions
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void ToggleDebugMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void DebugWallRunning();
+
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void EnhanceWallRunning(float SpeedMultiplier = 1.2f);
+
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	FString GetDebugInfo() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void DrawDebugHelpers(float Duration = 0.1f);
+
+	// Debug properties
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Debug)
+	bool bDebugModeEnabled;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Debug)
+	bool bEnhanceWallRunning;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Debug)
+	float WallRunSpeedMultiplier;
+
+protected:
+	// Movement component event handlers
 	UFUNCTION()
-	void OnMomentumChanged(const FGameEventData& EventData);
+	void HandleWallRunBegin(const FVector& WallNormal);
 
 	UFUNCTION()
-	void OnStylePointsGained(const FGameEventData& EventData);
+	void HandleWallRunEnd();
 
 	UFUNCTION()
-	void OnRiftPerformed(const FGameEventData& EventData);
+	void HandleSlideBegin();
 
 	UFUNCTION()
-	void OnWallRunStarted(const FGameEventData& EventData);
+	void HandleSlideEnd();
 
 	UFUNCTION()
-	void OnWallRunEnded(const FGameEventData& EventData);
+	void HandleDashBegin(const FVector& DashDirection);
 
 	UFUNCTION()
-	void OnWeaponFired(const FGameEventData& EventData);
+	void HandleDashEnd();
 
-	// Note: We're temporarily commenting out these interface methods due to linker errors
-	// We'll use direct component references for now
-	/*
-	class IMomentumInterface* GetMomentumInterface() const;
-	class IRiftInterface* GetRiftInterface() const;
-	class IStyleInterface* GetStyleInterface() const;
-	class IWallRunInterface* GetWallRunInterface() const;
-	*/
+	UFUNCTION()
+	void HandleMomentumChanged(float NewMomentum);
 
-	// Helper method to broadcast events
-	void BroadcastGameEvent(EGameEventType EventType, float FloatValue = 0.0f, int32 IntValue = 0, FName NameValue = NAME_None, AActor* Target = nullptr);
+	// Getter functions for input values
+	/** Get the current forward input value */
+	UFUNCTION(BlueprintPure, Category = "Movement|Input", meta = (ToolTip = "Get the current forward input value"))
+	float GetForwardInputValue() const { return ForwardInputValue; }
 
-	// Setup input actions for the InputHandlerComponent
-	void SetupInputActions();
+	/** Get the current right input value */
+	UFUNCTION(BlueprintPure, Category = "Movement|Input", meta = (ToolTip = "Get the current right input value"))
+	float GetRightInputValue() const { return RightInputValue; }
+
+	// Camera control functions
+	/** Updates camera tilt during wall running */
+	UFUNCTION(BlueprintCallable, Category = "Camera", meta = (ToolTip = "Updates camera tilt during wall running"))
+	void UpdateCameraDuringWallRun(float DeltaTime);
+
+	/** Updates camera position during sliding */
+	UFUNCTION(BlueprintCallable, Category = "Camera", meta = (ToolTip = "Updates camera position during sliding"))
+	void UpdateCameraDuringSlide(float DeltaTime);
+
+	/** Resets camera to default position and rotation */
+	UFUNCTION(BlueprintCallable, Category = "Camera", meta = (ToolTip = "Resets camera to default position and rotation"))
+	void ResetCameraToDefault(float DeltaTime);
+
+	// Movement input values
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Movement|Input", meta = (ToolTip = "Current forward movement input value"))
+	float ForwardInputValue;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Movement|Input", meta = (ToolTip = "Current right movement input value"))
+	float RightInputValue;
+
+	// Default camera values
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ToolTip = "Default camera boom arm length"))
+	float DefaultCameraBoomLength;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ToolTip = "Default camera relative location"))
+	FVector DefaultCameraLocation;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ToolTip = "Default camera relative rotation"))
+	FRotator DefaultCameraRotation;
+
+	// Timer handles
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Movement|Timers", meta = (ToolTip = "Timer for checking wall run conditions"))
+	FTimerHandle TimerHandle_CheckWallRun;
 };

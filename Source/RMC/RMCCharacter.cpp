@@ -1,978 +1,597 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "RMCCharacter.h"
-#include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/SpringArmComponent.h"
+#include "Components/InputComponent.h"
 #include "GameFramework/Controller.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
-#include "InputActionValue.h"
-#include "Rift/RiftComponent.h"
-#include "Rift/RiftAnchor.h"
-#include "Weapons/WeaponManagerComponent.h"
-#include "Weapons/StyleComponent.h"
-#include "Weapons/RangedWeaponBase.h"
-#include "WallRunComponent.h"
-#include "DoubleJumpComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "Core/ComponentLocator.h"
-#include "Core/GameEventSystem.h"
-#include "Core/MomentumInterface.h"
-#include "Core/RiftInterface.h"
-#include "Core/StyleInterface.h"
-#include "Core/WallRunInterface.h"
-#include "Core/DoubleJumpInterface.h"
+#include "Components/Movement/RMCMovementComponent.h"
 
-DEFINE_LOG_CATEGORY(LogTemplateCharacter);
-
-//////////////////////////////////////////////////////////////////////////
-// ARMCCharacter
-
-ARMCCharacter::ARMCCharacter()
+// Sets default values
+ARMCCharacter::ARMCCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<URMCMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
+ 	// Set this character to call Tick() every frame
+	PrimaryActorTick.bCanEverTick = true;
+
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-		
+
+	// Set our turn rates for input
+	BaseTurnRate = 45.f;
+	BaseLookUpRate = 45.f;
+
+	// Camera tilt settings
+	WallRunCameraTilt = 15.0f;
+	WallRunCameraTiltSpeed = 5.0f;
+	SlideCameraLowerOffset = 60.0f;
+	SlideCameraSpeed = 10.0f;
+
 	// Don't rotate when the controller rotates. Let that just affect the camera.
+	bRotateRootBoneWithController = false;
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
+	
+	// Initialize debug properties
+	bDebugModeEnabled = false;
+	bEnhanceWallRunning = false;
+	WallRunSpeedMultiplier = 1.2f;
 
 	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...	
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent)
+	{
+		MovementComponent->bOrientRotationToMovement = true; // Character moves in the direction of input...
+		MovementComponent->RotationRate = FRotator(0.0f, 540.0f, 0.0f); // ...at this rotation rate
+		MovementComponent->JumpZVelocity = 600.f;
+		MovementComponent->AirControl = 0.2f;
 
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
-	GetCharacterMovement()->JumpZVelocity = 700.f;
-	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 500.f;
-	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
+		// Set default momentum-based movement values
+		MovementComponent->WallRunSpeed = 800.0f;
+		MovementComponent->WallRunGravityScale = 0.25f;
+		MovementComponent->WallRunJumpOffForce = 500.0f;
+		MovementComponent->MinWallRunHeight = 50.0f;
+		MovementComponent->MaxWallRunTime = 2.5f;
+		MovementComponent->WallRunControlMultiplier = 0.5f;
+
+		MovementComponent->SlideSpeed = 1200.0f;
+		MovementComponent->SlideFriction = 0.2f;
+		MovementComponent->SlideMinDuration = 0.5f;
+		MovementComponent->SlideMaxDuration = 2.0f;
+		MovementComponent->SlideMinSpeed = 200.0f;
+
+		MovementComponent->DashDistance = 500.0f;
+		MovementComponent->DashDuration = 0.2f;
+		MovementComponent->DashCooldown = 1.0f;
+		MovementComponent->DashGroundSpeedBoost = 500.0f;
+		MovementComponent->DashAirSpeedBoost = 300.0f;
+
+		MovementComponent->DoubleJumpZVelocity = 600.0f;
+
+		MovementComponent->MomentumRetentionRate = 0.9f;
+		MovementComponent->MaxMomentum = 100.0f;
+		MovementComponent->MomentumDecayRate = 5.0f;
+		MovementComponent->MomentumBuildRate = 10.0f;
+	}
 
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character	
+	CameraBoom->TargetArmLength = 300.0f; // The camera follows at this distance behind the character	
 	CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
 
 	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); // Attach the camera to the end of the boom and let the boom adjust to match the controller orientation
+	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); // Attach the camera to the end of the boom
 	FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
 
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
-	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+	// Initialize movement input values
+	ForwardInputValue = 0.0f;
+	RightInputValue = 0.0f;
 
-	// Create the component locator (must be created first for other components to register with it)
-	ComponentLocator = CreateDefaultSubobject<UComponentLocator>(TEXT("ComponentLocator"));
-
-	// Create the rift component
-	RiftComponent = CreateDefaultSubobject<URiftComponent>(TEXT("RiftComponent"));
-
-	// Create the weapon manager component
-	WeaponManager = CreateDefaultSubobject<UWeaponManagerComponent>(TEXT("WeaponManager"));
-
-	// Create the style component
-	StyleComponent = CreateDefaultSubobject<UStyleComponent>(TEXT("StyleComponent"));
-
-	// Create the momentum component
-	MomentumComponent = CreateDefaultSubobject<UMomentumComponent>(TEXT("MomentumComponent"));
-
-	// Create the wall run component
-	WallRunComponent = CreateDefaultSubobject<UWallRunComponent>(TEXT("WallRunComponent"));
-
-	// Create the double jump component
-	DoubleJumpComponent = CreateDefaultSubobject<UDoubleJumpComponent>(TEXT("DoubleJumpComponent"));
-
-	// Initialize event system reference
-	EventSystem = nullptr;
+	// Initialize animation properties
+	bIsWallRunningLeft = false;
+	bIsWallRunningRight = false;
 }
 
+// Called when the game starts or when spawned
 void ARMCCharacter::BeginPlay()
 {
-	// Call the base class  
 	Super::BeginPlay();
 
-	// Get the event system
-	if (UGameInstance* GameInstance = GetGameInstance())
+	// Store default camera values
+	DefaultCameraBoomLength = CameraBoom->TargetArmLength;
+	DefaultCameraLocation = FollowCamera->GetRelativeLocation();
+	DefaultCameraRotation = FollowCamera->GetRelativeRotation();
+
+	// Bind to movement component events
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent)
 	{
-		EventSystem = GameInstance->GetSubsystem<UGameEventSubsystem>();
-		if (EventSystem)
+		MovementComponent->OnWallRunBegin.AddDynamic(this, &ARMCCharacter::HandleWallRunBegin);
+		MovementComponent->OnWallRunEnd.AddDynamic(this, &ARMCCharacter::HandleWallRunEnd);
+		MovementComponent->OnSlideBegin.AddDynamic(this, &ARMCCharacter::HandleSlideBegin);
+		MovementComponent->OnSlideEnd.AddDynamic(this, &ARMCCharacter::HandleSlideEnd);
+		MovementComponent->OnDashBegin.AddDynamic(this, &ARMCCharacter::HandleDashBegin);
+		MovementComponent->OnDashEnd.AddDynamic(this, &ARMCCharacter::HandleDashEnd);
+		MovementComponent->OnMomentumChanged.AddDynamic(this, &ARMCCharacter::HandleMomentumChanged);
+	}
+
+	// Set up wall run check timer
+	GetWorldTimerManager().SetTimer(TimerHandle_CheckWallRun, this, &ARMCCharacter::TryWallRun, 0.1f, true);
+}
+
+// Called every frame
+void ARMCCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Update camera based on movement state
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent)
+	{
+		if (MovementComponent->bIsWallRunning)
 		{
-			// Register for events
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::MomentumChanged, this, FName("OnMomentumChanged")));
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::StylePointsGained, this, FName("OnStylePointsGained")));
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::RiftPerformed, this, FName("OnRiftPerformed")));
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::WallRunStarted, this, FName("OnWallRunStarted")));
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::WallRunEnded, this, FName("OnWallRunEnded")));
-			EventListenerHandles.Add(EventSystem->AddEventListenerWithObject(EGameEventType::WeaponFired, this, FName("OnWeaponFired")));
+			UpdateCameraDuringWallRun(DeltaTime);
+		}
+		else if (MovementComponent->bIsSliding)
+		{
+			UpdateCameraDuringSlide(DeltaTime);
 		}
 		else
 		{
-			UE_LOG(LogTemplateCharacter, Warning, TEXT("%s: Failed to get GameEventSubsystem. Event-based communication will be disabled."), *GetNameSafe(this));
+			ResetCameraToDefault(DeltaTime);
 		}
 	}
-
-	// Add default weapons
-	for (TSubclassOf<URangedWeaponBase> WeaponClass : DefaultWeapons)
-	{
-		if (WeaponClass && WeaponManager)
-		{
-			WeaponManager->AddWeaponToInventory(WeaponClass);
-		}
-	}
+	
+	// Draw debug helpers if debug mode is enabled
+    if (bDebugModeEnabled)
+    {
+        DrawDebugHelpers(0.0f);
+    }
 }
 
-void ARMCCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+// Called to bind functionality to input
+void ARMCCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-	// Clean up event listeners
-	if (EventSystem)
-	{
-		for (int32 Handle : EventListenerHandles)
-		{
-			EventSystem->RemoveEventListener(Handle);
-		}
-		EventListenerHandles.Empty();
-	}
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	// Call the base class
-	Super::EndPlay(EndPlayReason);
+	// Set up gameplay key bindings
+	PlayerInputComponent->BindAxis("MoveForward", this, &ARMCCharacter::MoveForward);
+	PlayerInputComponent->BindAxis("MoveRight", this, &ARMCCharacter::MoveRight);
+	PlayerInputComponent->BindAxis("Turn", this, &ARMCCharacter::Turn);
+	PlayerInputComponent->BindAxis("LookUp", this, &ARMCCharacter::LookUp);
+	PlayerInputComponent->BindAxis("TurnRate", this, &ARMCCharacter::TurnAtRate);
+	PlayerInputComponent->BindAxis("LookUpRate", this, &ARMCCharacter::LookUpAtRate);
+
+	// Set up action bindings
+	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ARMCCharacter::OnJumpActionPressed);
+	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ARMCCharacter::OnJumpActionReleased);
+	PlayerInputComponent->BindAction("Dash", IE_Pressed, this, &ARMCCharacter::OnDashActionPressed);
+	PlayerInputComponent->BindAction("Slide", IE_Pressed, this, &ARMCCharacter::OnSlideActionPressed);
+	PlayerInputComponent->BindAction("Slide", IE_Released, this, &ARMCCharacter::OnSlideActionReleased);
+}
+
+URMCMovementComponent* ARMCCharacter::GetRMCMovementComponent() const
+{
+	return Cast<URMCMovementComponent>(GetCharacterMovement());
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Input
+// Input handlers
 
-void ARMCCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+void ARMCCharacter::MoveForward(float Value)
 {
-	// Add Input Mapping Context
-	if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+	ForwardInputValue = Value;
+
+	if ((Controller != nullptr) && (Value != 0.0f))
 	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
-		{
-			Subsystem->AddMappingContext(DefaultMappingContext, 0);
-		}
-	}
-	
-	// Set up action bindings
-	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
-		
-		// Jumping
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-
-		// Moving
-		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ARMCCharacter::Move);
-
-		// Looking
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ARMCCharacter::Look);
-
-		// Phantom Dodge
-		if (PhantomDodgeAction)
-		{
-			EnhancedInputComponent->BindAction(PhantomDodgeAction, ETriggerEvent::Started, this, &ARMCCharacter::PerformPhantomDodge);
-		}
-
-		// Rift Tether
-		if (RiftTetherAction)
-		{
-			EnhancedInputComponent->BindAction(RiftTetherAction, ETriggerEvent::Started, this, &ARMCCharacter::PerformRiftTether);
-		}
-
-		// Weapon Fire
-		if (FireAction)
-		{
-			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &ARMCCharacter::Fire);
-		}
-
-		// Weapon Alt Fire
-		if (AltFireAction)
-		{
-			EnhancedInputComponent->BindAction(AltFireAction, ETriggerEvent::Started, this, &ARMCCharacter::AltFire);
-			EnhancedInputComponent->BindAction(AltFireAction, ETriggerEvent::Completed, this, &ARMCCharacter::ReleaseCharge);
-		}
-
-		// Weapon Reload
-		if (ReloadAction)
-		{
-			EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &ARMCCharacter::Reload);
-		}
-
-		// Weapon Switch
-		if (WeaponSwitchAction)
-		{
-			EnhancedInputComponent->BindAction(WeaponSwitchAction, ETriggerEvent::Started, this, &ARMCCharacter::SwitchWeapon);
-		}
-
-		// Wall Run
-		if (WallRunAction)
-		{
-			EnhancedInputComponent->BindAction(WallRunAction, ETriggerEvent::Started, this, &ARMCCharacter::TryWallRun);
-		}
-
-		// Wall Jump
-		if (WallJumpAction)
-		{
-			EnhancedInputComponent->BindAction(WallJumpAction, ETriggerEvent::Started, this, &ARMCCharacter::TryWallJump);
-		}
-
-		// Double Jump
-		if (DoubleJumpAction)
-		{
-			EnhancedInputComponent->BindAction(DoubleJumpAction, ETriggerEvent::Started, this, &ARMCCharacter::TryDoubleJump);
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemplateCharacter, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
-	}
-}
-
-void ARMCCharacter::Move(const FInputActionValue& Value)
-{
-	// input is a Vector2D
-	FVector2D MovementVector = Value.Get<FVector2D>();
-
-	if (Controller != nullptr)
-	{
-		// find out which way is forward
-		const FRotator Rotation = Controller->GetControlRotation();
-		const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-		// get forward vector
-		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	
-		// get right vector 
-		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-		// add movement 
-		AddMovementInput(ForwardDirection, MovementVector.Y);
-		AddMovementInput(RightDirection, MovementVector.X);
-	}
-}
-
-void ARMCCharacter::Look(const FInputActionValue& Value)
-{
-	// input is a Vector2D
-	FVector2D LookAxisVector = Value.Get<FVector2D>();
-
-	if (Controller != nullptr)
-	{
-		// add yaw and pitch input to controller
-		AddControllerYawInput(LookAxisVector.X);
-		AddControllerPitchInput(LookAxisVector.Y);
-	}
-}
-
-void ARMCCharacter::PerformPhantomDodge(const FInputActionValue& Value)
-{
-	// For now, we'll use the direct component reference since we're having issues with the interface execution
-	if (!RiftComponent)
-	{
-		return;
-	}
-
-	// Get movement direction
-	FVector Direction = FVector::ZeroVector;
-
-	// If we're providing input, use that direction
-	if (Controller)
-	{
+		// Find out which way is forward
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
 		// Get forward vector
-		Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	}
-
-	// If no direction, use actor forward
-	if (Direction.IsNearlyZero())
-	{
-		Direction = GetActorForwardVector();
-	}
-
-	// Check if we're in the air
-	bool bIsAerial = GetCharacterMovement() && GetCharacterMovement()->IsFalling();
-
-	// Check if we have enough momentum for aerial dodge if applicable
-	if (bIsAerial && MomentumComponent)
-	{
-		// Aerial dodges might require a minimum momentum tier
-		int32 CurrentTier = MomentumComponent->GetMomentumTier();
-		if (CurrentTier < 1) // Require at least tier 1 for aerial dodges
-		{
-			// Not enough momentum for aerial dodge
-			return;
-		}
-	}
-
-	// Perform the phantom dodge
-	if (RiftComponent->PerformPhantomDodge(Direction, bIsAerial))
-	{
-		// Get style value for phantom dodge
-		float StyleValue = 0.0f;
-		if (StyleComponent)
-		{
-			StyleValue = StyleComponent->GetMoveStyleValue(FName("PhantomDodge"));
-		}
-		
-		// Add style points for successful dodge
-		AddStylePoints(StyleValue, FName("PhantomDodge"));
-		
-		// Add additional momentum directly for successful dodge
-		if (MomentumComponent)
-		{
-			// Add more momentum for aerial dodges to encourage stylish play
-			float MomentumBonus = bIsAerial ? 15.0f : 10.0f;
-			MomentumComponent->AddMomentum(MomentumBonus, FName("PhantomDodge"));
-		}
-		
-		// Broadcast rift performed event
-		BroadcastGameEvent(EGameEventType::RiftPerformed, 0.0f, 0, FName("PhantomDodge"));
+		const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+		AddMovementInput(Direction, Value);
 	}
 }
 
-void ARMCCharacter::PerformRiftTether(const FInputActionValue& Value)
+void ARMCCharacter::MoveRight(float Value)
 {
-	// For now, we'll use the direct component reference since we're having issues with the interface execution
-	if (!RiftComponent)
+	RightInputValue = Value;
+
+	if ((Controller != nullptr) && (Value != 0.0f))
 	{
-		return;
-	}
-
-	// Find the best rift anchor in range
-	ARiftAnchor* BestAnchor = FindBestRiftAnchor();
-
-	// If we found an anchor, tether to it
-	if (BestAnchor)
-	{
-		// Check if we have enough momentum for this anchor
-		if (BestAnchor->RequiredMomentum > 0 && MomentumComponent)
-		{
-			// Make sure we meet the momentum requirement
-			if (MomentumComponent->CurrentMomentum < BestAnchor->RequiredMomentum)
-			{
-				// Not enough momentum for this anchor
-				return;
-			}
-		}
-
-		if (RiftComponent->InitiateRiftTetherToAnchor(BestAnchor))
-		{
-			// Get style value for rift tether
-			float StyleValue = 0.0f;
-			if (StyleComponent)
-			{
-				StyleValue = StyleComponent->GetMoveStyleValue(FName("RiftTether"));
-			}
-			
-			// Add style points for successful tether
-			AddStylePoints(StyleValue, FName("RiftTether"));
-			
-			// Add additional momentum directly for successful tether
-			if (MomentumComponent)
-			{
-				MomentumComponent->AddMomentum(12.0f, FName("RiftTether"));
-			}
-			
-			// Broadcast rift performed event
-			BroadcastGameEvent(EGameEventType::RiftPerformed, 0.0f, 0, FName("RiftTether"), BestAnchor);
-		}
-	}
-	// Otherwise, try to chain if we're already tethering
-	else if (RiftComponent->GetRiftState() == ERiftState::Tethering)
-	{
-		// Check if we have enough momentum for chaining
-		if (MomentumComponent)
-		{
-			int32 CurrentTier = MomentumComponent->GetMomentumTier();
-			int32 RequiredTier = 1; // Require at least tier 1 for basic chaining
-			
-			// For multiple chains, require higher tiers
-			if (RiftComponent->CurrentChainCount > 0)
-			{
-				RequiredTier = 2; // Tier 2 for second chain
-			}
-			if (RiftComponent->CurrentChainCount > 1)
-			{
-				RequiredTier = 3; // Tier 3 for third chain and beyond
-			}
-			
-			if (CurrentTier < RequiredTier)
-			{
-				// Not enough momentum for chaining
-				return;
-			}
-		}
-
-		if (RiftComponent->ChainRiftTether())
-		{
-			// Get style value for chain rift
-			float StyleValue = 0.0f;
-			if (StyleComponent)
-			{
-				StyleValue = StyleComponent->GetMoveStyleValue(FName("ChainRift"));
-			}
-			
-			// Add style points for successful chain
-			AddStylePoints(StyleValue, FName("ChainRift"));
-			
-			// Add additional momentum directly for successful chain
-			// Give more momentum for chains to encourage combo play
-			if (MomentumComponent)
-			{
-				MomentumComponent->AddMomentum(18.0f, FName("ChainRift"));
-			}
-			
-			// Broadcast rift performed event
-			BroadcastGameEvent(EGameEventType::RiftPerformed, 0.0f, 0, FName("ChainRift"));
-		}
+		// Find out which way is right
+		const FRotator Rotation = Controller->GetControlRotation();
+		const FRotator YawRotation(0, Rotation.Yaw, 0);
+	
+		// Get right vector 
+		const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+		AddMovementInput(Direction, Value);
 	}
 }
 
-void ARMCCharacter::Fire(const FInputActionValue& Value)
+void ARMCCharacter::LookUp(float Value)
 {
-	// For now, we'll keep using the direct WeaponManager reference
-	// since we haven't created a WeaponManagerInterface yet
-	if (WeaponManager)
-	{
-		// Apply momentum-based damage multiplier if available
-		if (MomentumComponent)
-		{
-			// Get the current weapon
-			URangedWeaponBase* CurrentWeapon = WeaponManager->CurrentWeapon;
-			if (CurrentWeapon)
-			{
-				// Store original damage
-				float OriginalDamage = CurrentWeapon->BaseDamage;
-				
-				// Apply momentum-based damage multiplier
-				float DamageMultiplier = MomentumComponent->GetDamageMultiplier();
-				CurrentWeapon->BaseDamage *= DamageMultiplier;
-				
-				// Fire the weapon
-				WeaponManager->FireCurrentWeapon();
-				
-				// Restore original damage
-				CurrentWeapon->BaseDamage = OriginalDamage;
-				
-				// Small momentum gain just for firing (encourages active play)
-				MomentumComponent->AddMomentum(2.0f, FName("WeaponFire"));
-				
-				// Broadcast weapon fired event
-				BroadcastGameEvent(EGameEventType::WeaponFired, 0.0f, 0, FName("WeaponFire"));
-				return;
-			}
-		}
-		
-		// If no momentum component or current weapon, just fire normally
-		WeaponManager->FireCurrentWeapon();
-		
-		// Broadcast weapon fired event
-		BroadcastGameEvent(EGameEventType::WeaponFired, 0.0f, 0, FName("WeaponFire"));
-		
-		// Style points will be added when the projectile hits a target
-		// This is handled in the projectile's OnHit function
-	}
+	AddControllerPitchInput(Value);
 }
 
-void ARMCCharacter::AltFire(const FInputActionValue& Value)
+void ARMCCharacter::Turn(float Value)
 {
-	if (WeaponManager)
-	{
-		WeaponManager->StartChargeCurrentWeapon();
-		
-		// Small momentum gain for starting a charge (encourages charged shots)
-		if (MomentumComponent)
-		{
-			MomentumComponent->AddMomentum(1.0f, FName("StartCharge"));
-		}
-	}
+	AddControllerYawInput(Value);
 }
 
-void ARMCCharacter::ReleaseCharge(const FInputActionValue& Value)
+void ARMCCharacter::TurnAtRate(float Rate)
 {
-	if (WeaponManager)
-	{
-		// Apply momentum-based damage multiplier if available
-		if (MomentumComponent)
-		{
-			// Get the current weapon
-			URangedWeaponBase* CurrentWeapon = WeaponManager->CurrentWeapon;
-			if (CurrentWeapon)
-			{
-				// Store original damage
-				float OriginalDamage = CurrentWeapon->BaseDamage;
-				
-				// Apply momentum-based damage multiplier with bonus for charged shots
-				float DamageMultiplier = MomentumComponent->GetDamageMultiplier() * 1.2f;
-				CurrentWeapon->BaseDamage *= DamageMultiplier;
-				
-				// Release the charge
-				WeaponManager->ReleaseChargeCurrentWeapon();
-				
-				// Restore original damage
-				CurrentWeapon->BaseDamage = OriginalDamage;
-				
-				// Momentum gain for charged shots (more than regular shots)
-				MomentumComponent->AddMomentum(5.0f, FName("ChargedShot"));
-				
-				// Broadcast weapon fired event
-				BroadcastGameEvent(EGameEventType::WeaponFired, 0.0f, 0, FName("ChargedShot"));
-				return;
-			}
-		}
-		
-		// If no momentum component or current weapon, just release normally
-		WeaponManager->ReleaseChargeCurrentWeapon();
-		
-		// Broadcast weapon fired event
-		BroadcastGameEvent(EGameEventType::WeaponFired, 0.0f, 0, FName("ChargedShot"));
-		
-		// Style points will be added when the projectile hits a target
-		// This is handled in the projectile's OnHit function
-	}
+	AddControllerYawInput(Rate * BaseTurnRate * GetWorld()->GetDeltaSeconds());
 }
 
-void ARMCCharacter::Reload(const FInputActionValue& Value)
+void ARMCCharacter::LookUpAtRate(float Rate)
 {
-	if (WeaponManager)
-	{
-		WeaponManager->StartReloadCurrentWeapon();
-		
-		// Broadcast weapon reloaded event
-		BroadcastGameEvent(EGameEventType::WeaponReloaded, 0.0f, 0, FName("WeaponReload"));
-	}
+	AddControllerPitchInput(Rate * BaseLookUpRate * GetWorld()->GetDeltaSeconds());
 }
 
-void ARMCCharacter::SwitchWeapon(const FInputActionValue& Value)
+//////////////////////////////////////////////////////////////////////////
+// Momentum-based movement actions
+
+void ARMCCharacter::OnJumpActionPressed()
 {
-	if (WeaponManager)
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent)
 	{
-		// Get the input value (can be used to determine direction of switch)
-		float SwitchDirection = Value.Get<float>();
-		
-		if (SwitchDirection > 0.0f)
+		// If wall running, perform wall jump
+		if (MovementComponent->bIsWallRunning)
 		{
-			WeaponManager->NextWeapon();
+			MovementComponent->WallRunJump();
 		}
+		// If in air and can double jump, perform double jump
+		else if (MovementComponent->IsFalling() && MovementComponent->CanDoubleJump())
+		{
+			MovementComponent->PerformDoubleJump();
+			// Call blueprint native event
+			OnDoubleJump();
+		}
+		// Otherwise, normal jump
 		else
 		{
-			WeaponManager->PreviousWeapon();
+			Jump();
 		}
-		
-		// We could broadcast a weapon switched event here, but we'll need to add it to the event types first
-		// For now, we'll rely on the WeaponManager's OnWeaponSwitched delegate
-	}
-}
-
-// Note: We're temporarily commenting out these interface methods due to linker errors
-// We'll use direct component references for now
-/*
-// Helper methods for getting interfaces
-IMomentumInterface* ARMCCharacter::GetMomentumInterface() const
-{
-	// First try to get from component locator
-	if (ComponentLocator)
-	{
-		UActorComponent* Component = ComponentLocator->GetComponentByClass(UMomentumComponent::StaticClass());
-		if (Component)
-		{
-			return Cast<IMomentumInterface>(Component);
-		}
-	}
-	
-	// Fallback to direct reference
-	if (MomentumComponent)
-	{
-		return Cast<IMomentumInterface>(MomentumComponent);
-	}
-	
-	return nullptr;
-}
-
-IRiftInterface* ARMCCharacter::GetRiftInterface() const
-{
-	// First try to get from component locator
-	if (ComponentLocator)
-	{
-		UActorComponent* Component = ComponentLocator->GetComponentByClass(URiftComponent::StaticClass());
-		if (Component)
-		{
-			return Cast<IRiftInterface>(Component);
-		}
-	}
-	
-	// Fallback to direct reference
-	if (RiftComponent)
-	{
-		return Cast<IRiftInterface>(RiftComponent);
-	}
-	
-	return nullptr;
-}
-
-IStyleInterface* ARMCCharacter::GetStyleInterface() const
-{
-	// First try to get from component locator
-	if (ComponentLocator)
-	{
-		UActorComponent* Component = ComponentLocator->GetComponentByClass(UStyleComponent::StaticClass());
-		if (Component)
-		{
-			return Cast<IStyleInterface>(Component);
-		}
-	}
-	
-	// Fallback to direct reference
-	if (StyleComponent)
-	{
-		return Cast<IStyleInterface>(StyleComponent);
-	}
-	
-	return nullptr;
-}
-
-IWallRunInterface* ARMCCharacter::GetWallRunInterface() const
-{
-	// First try to get from component locator
-	if (ComponentLocator)
-	{
-		UActorComponent* Component = ComponentLocator->GetComponentByClass(UWallRunComponent::StaticClass());
-		if (Component)
-		{
-			return Cast<IWallRunInterface>(Component);
-		}
-	}
-	
-	// Fallback to direct reference
-	if (WallRunComponent)
-	{
-		return Cast<IWallRunInterface>(WallRunComponent);
-	}
-	
-	return nullptr;
-}
-*/
-
-// Helper method to broadcast events
-void ARMCCharacter::BroadcastGameEvent(EGameEventType EventType, float FloatValue, int32 IntValue, FName NameValue, AActor* Target)
-{
-	if (EventSystem)
-	{
-		FGameEventData EventData;
-		EventData.EventType = EventType;
-		EventData.Instigator = this;
-		EventData.Target = Target;
-		EventData.FloatValue = FloatValue;
-		EventData.IntValue = IntValue;
-		EventData.NameValue = NameValue;
-		EventSystem->BroadcastEvent(EventData);
-	}
-}
-
-// Event handlers
-void ARMCCharacter::OnMomentumChanged(const FGameEventData& EventData)
-{
-	// This event is broadcast when momentum changes
-	// We can use this to update character visuals, sounds, etc. based on momentum
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Momentum changed: %f"), EventData.FloatValue);
-}
-
-void ARMCCharacter::OnStylePointsGained(const FGameEventData& EventData)
-{
-	// This event is broadcast when style points are gained
-	// We can use this to update character visuals, sounds, etc. based on style
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Style points gained: %f from %s"), 
-		EventData.FloatValue, *EventData.NameValue.ToString());
-}
-
-void ARMCCharacter::OnRiftPerformed(const FGameEventData& EventData)
-{
-	// This event is broadcast when a rift action is performed
-	// We can use this to update character visuals, sounds, etc. based on rift actions
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Rift performed: %s"), *EventData.NameValue.ToString());
-}
-
-void ARMCCharacter::OnWallRunStarted(const FGameEventData& EventData)
-{
-	// This event is broadcast when wall running starts
-	// We can use this to update character visuals, sounds, etc. based on wall running
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Wall run started"));
-}
-
-void ARMCCharacter::OnWallRunEnded(const FGameEventData& EventData)
-{
-	// This event is broadcast when wall running ends
-	// We can use this to update character visuals, sounds, etc. based on wall running
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Wall run ended"));
-}
-
-void ARMCCharacter::OnWeaponFired(const FGameEventData& EventData)
-{
-	// This event is broadcast when a weapon is fired
-	// We can use this to update character visuals, sounds, etc. based on weapon firing
-	
-	// For now, we'll just log the event
-	UE_LOG(LogTemplateCharacter, Verbose, TEXT("Weapon fired: %s"), *EventData.NameValue.ToString());
-}
-
-ARiftAnchor* ARMCCharacter::FindBestRiftAnchor() const
-{
-	if (!GetWorld())
-	{
-		return nullptr;
-	}
-
-	// Get all rift anchors in the world
-	TArray<AActor*> FoundAnchors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARiftAnchor::StaticClass(), FoundAnchors);
-
-	if (FoundAnchors.Num() == 0)
-	{
-		return nullptr;
-	}
-
-	// Get player view point
-	FVector CameraLocation;
-	FRotator CameraRotation;
-	if (Controller && Controller->IsPlayerController())
-	{
-		Cast<APlayerController>(Controller)->GetPlayerViewPoint(CameraLocation, CameraRotation);
 	}
 	else
 	{
-		CameraLocation = GetActorLocation();
-		CameraRotation = GetActorRotation();
+		Jump();
 	}
-
-	// Get forward vector
-	FVector ForwardVector = CameraRotation.Vector();
-
-	// Find the anchor that best matches our view direction and is within range
-	ARiftAnchor* BestAnchor = nullptr;
-	float BestScore = -1.0f;
-	float MaxDistance = 1000.0f; // Default max distance
-
-	// If we have a rift component, use its max distance
-	if (RiftComponent)
-	{
-		MaxDistance = RiftComponent->GetRiftCapabilities().MaxRiftDistance;
-	}
-
-	// Get current momentum for anchor compatibility check
-	float CurrentMomentum = 0.0f;
-	if (MomentumComponent)
-	{
-		CurrentMomentum = MomentumComponent->CurrentMomentum;
-	}
-
-	for (AActor* Actor : FoundAnchors)
-	{
-		ARiftAnchor* Anchor = Cast<ARiftAnchor>(Actor);
-		if (!Anchor || !Anchor->CanUseWithMomentum(CurrentMomentum))
-		{
-			continue;
-		}
-
-		// Calculate distance and direction to anchor
-		FVector ToAnchor = Anchor->GetActorLocation() - CameraLocation;
-		float Distance = ToAnchor.Size();
-
-		// Skip if too far
-		if (Distance > MaxDistance)
-		{
-			continue;
-		}
-
-		// Normalize
-		ToAnchor.Normalize();
-
-		// Calculate dot product to see how closely it aligns with our view
-		float DotProduct = FVector::DotProduct(ForwardVector, ToAnchor);
-
-		// Skip if behind us
-		if (DotProduct < 0.5f) // Roughly 60 degree cone
-		{
-			continue;
-		}
-
-		// Score based on alignment and distance (prefer closer anchors)
-		float Score = DotProduct * (1.0f - (Distance / MaxDistance));
-
-		if (Score > BestScore)
-		{
-			BestScore = Score;
-			BestAnchor = Anchor;
-		}
-	}
-
-	return BestAnchor;
 }
 
-void ARMCCharacter::AddStylePoints(float Points, FName MoveName)
+void ARMCCharacter::OnJumpActionReleased()
 {
-	// Broadcast style points gained event through the event system
-	if (EventSystem)
+	StopJumping();
+}
+
+void ARMCCharacter::OnDashActionPressed()
+{
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent && MovementComponent->CanDash())
 	{
-		FGameEventData EventData;
-		EventData.EventType = EGameEventType::StylePointsGained;
-		EventData.Instigator = this;
-		EventData.FloatValue = Points;
-		EventData.NameValue = MoveName;
-		EventSystem->BroadcastEvent(EventData);
+		MovementComponent->PerformDash();
+	}
+}
+
+void ARMCCharacter::OnSlideActionPressed()
+{
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent && MovementComponent->CanSlide())
+	{
+		MovementComponent->StartSlide();
+	}
+}
+
+void ARMCCharacter::OnSlideActionReleased()
+{
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (MovementComponent && MovementComponent->bIsSliding)
+	{
+		MovementComponent->EndSlide();
+	}
+}
+
+void ARMCCharacter::TryWallRun()
+{
+	URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+	if (!MovementComponent)
+	{
+		return;
 	}
 	
-	// For backward compatibility, also call the direct methods
-	// These will eventually be removed once all components are updated to use the event system
-	if (StyleComponent)
-	{
-		StyleComponent->AddStylePoints(Points, MoveName);
-	}
-
-	// Also add momentum when gaining style points
-	if (MomentumComponent)
-	{
-		// Convert style points to momentum (at a reduced rate)
-		float MomentumGain = Points * 0.2f;
-		MomentumComponent->AddMomentum(MomentumGain, MoveName);
-	}
-}
-
-void ARMCCharacter::TryWallRun(const FInputActionValue& Value)
-{
-	// For now, we'll use the direct component reference since we're having issues with the interface execution
-	if (!WallRunComponent)
+	// If already wall running, no need to check
+	if (MovementComponent->bIsWallRunning)
 	{
 		return;
 	}
-
-	// Try to start wall running
-	if (WallRunComponent->TryStartWallRun())
+	
+	// Check if we're in a state where wall running is possible
+	if (MovementComponent->IsFalling() && !MovementComponent->bIsSliding && !MovementComponent->bIsDashing)
 	{
-		// Get style value for wall run
-		float StyleValue = 0.0f;
-		if (StyleComponent)
+		// Check velocity - must be moving at a decent speed
+		float Speed = MovementComponent->Velocity.Size2D();
+		if (Speed > 200.0f)
 		{
-			StyleValue = StyleComponent->GetMoveStyleValue(FName("WallRun"));
-		}
-		
-		// Add style points for successful wall run
-		AddStylePoints(StyleValue, FName("WallRun"));
-
-		// Broadcast wall run started event
-		BroadcastGameEvent(EGameEventType::WallRunStarted, 0.0f, 0, FName("WallRun"));
-		
-		// Additional momentum gain is handled in the WallRunComponent
-	}
-}
-
-void ARMCCharacter::TryWallJump(const FInputActionValue& Value)
-{
-	// For now, we'll use the direct component reference since we're having issues with the interface execution
-	if (!WallRunComponent)
-	{
-		return;
-	}
-
-	// Try to perform wall jump
-	if (WallRunComponent->PerformWallJump())
-	{
-		// Get style value for wall jump
-		float StyleValue = 0.0f;
-		if (StyleComponent)
-		{
-			StyleValue = StyleComponent->GetMoveStyleValue(FName("WallJump"));
-		}
-		
-		// Add style points for successful wall jump
-		AddStylePoints(StyleValue, FName("WallJump"));
-		
-		// Broadcast wall jump event
-		BroadcastGameEvent(EGameEventType::WallRunEnded, 0.0f, 0, FName("WallJump"));
-
-		// Additional momentum gain is handled in the WallRunComponent
-	}
-}
-
-void ARMCCharacter::TryDoubleJump(const FInputActionValue& Value)
-{
-	// For now, we'll use the direct component reference since we're having issues with the interface execution
-	if (!DoubleJumpComponent)
-	{
-		return;
-	}
-
-	// Try to perform double jump
-	if (DoubleJumpComponent->PerformDoubleJump())
-	{
-		// Get style value for double jump
-		float StyleValue = 0.0f;
-		if (StyleComponent)
-		{
-			StyleValue = StyleComponent->GetMoveStyleValue(FName("DoubleJump"));
-			if (StyleValue <= 0.0f)
+			// Use CanWallRun instead of directly calling FindWallRunSurface
+			if (MovementComponent->CanWallRun())
 			{
-				// Default style value if not defined
-				StyleValue = 100.0f;
+				// Start wall running
+				MovementComponent->StartWallRun();
 			}
 		}
-		
-		// Add style points for successful double jump
-		AddStylePoints(StyleValue, FName("DoubleJump"));
-		
-		// Broadcast double jump event (using wall run ended event type for now)
-		BroadcastGameEvent(EGameEventType::WallRunEnded, 0.0f, 0, FName("DoubleJump"));
-
-		// Additional momentum gain is handled in the DoubleJumpComponent
 	}
 }
 
-float ARMCCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+//////////////////////////////////////////////////////////////////////////
+// Movement component event handlers
+
+void ARMCCharacter::HandleWallRunBegin(const FVector& WallNormal)
 {
-	// Call parent implementation
-	float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	// Determine if wall running on left or right side
+	FVector Right = GetActorRightVector();
+	float DotProduct = FVector::DotProduct(Right, WallNormal);
 
-	// Only process damage if it's greater than 0
-	if (ActualDamage > 0.0f)
+	bIsWallRunningLeft = DotProduct > 0;
+	bIsWallRunningRight = DotProduct < 0;
+
+	// Call blueprint native event
+	OnWallRunBegin(WallNormal);
+}
+
+void ARMCCharacter::OnWallRunBegin_Implementation(const FVector& WallNormal)
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleWallRunEnd()
+{
+	bIsWallRunningLeft = false;
+	bIsWallRunningRight = false;
+
+	// Call blueprint native event
+	OnWallRunEnd();
+}
+
+void ARMCCharacter::OnWallRunEnd_Implementation()
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleSlideBegin()
+{
+	// Call blueprint native event
+	OnSlideBegin();
+}
+
+void ARMCCharacter::OnSlideBegin_Implementation()
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleSlideEnd()
+{
+	// Call blueprint native event
+	OnSlideEnd();
+}
+
+void ARMCCharacter::OnSlideEnd_Implementation()
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleDashBegin(const FVector& DashDirection)
+{
+	// Call blueprint native event
+	OnDashBegin(DashDirection);
+}
+
+void ARMCCharacter::OnDashBegin_Implementation(const FVector& DashDirection)
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleDashEnd()
+{
+	// Call blueprint native event
+	OnDashEnd();
+}
+
+void ARMCCharacter::OnDashEnd_Implementation()
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::HandleMomentumChanged(float NewMomentum)
+{
+	// Call blueprint native event
+	OnMomentumChanged(NewMomentum);
+}
+
+void ARMCCharacter::OnMomentumChanged_Implementation(float NewMomentum)
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+void ARMCCharacter::OnDoubleJump_Implementation()
+{
+	// Default implementation - can be overridden in Blueprints
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Debug Helper Functions
+
+void ARMCCharacter::ToggleDebugMode()
+{
+    bDebugModeEnabled = !bDebugModeEnabled;
+    
+    if (bDebugModeEnabled)
+    {
+        UE_LOG(LogTemp, Display, TEXT("Debug mode enabled for %s"), *GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Display, TEXT("Debug mode disabled for %s"), *GetName());
+    }
+}
+
+void ARMCCharacter::DebugWallRunning()
+{
+    URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+    if (MovementComponent)
+    {
+        MovementComponent->DebugWallRunning(true, true, 2.0f);
+    }
+}
+
+void ARMCCharacter::EnhanceWallRunning(float SpeedMultiplier)
+{
+    URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+    if (MovementComponent && MovementComponent->bIsWallRunning)
+    {
+        MovementComponent->ForceWallRunSpeed(SpeedMultiplier);
+    }
+}
+
+FString ARMCCharacter::GetDebugInfo() const
+{
+    FString DebugInfo;
+    
+    URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+    if (MovementComponent)
+    {
+        DebugInfo += MovementComponent->GetMovementStateDebugString();
+        DebugInfo += FString::Printf(TEXT("\nVelocity: %.1f"), MovementComponent->Velocity.Size());
+        DebugInfo += FString::Printf(TEXT("\nMomentum: %.1f / %.1f"), 
+            MovementComponent->GetCurrentMomentum(), MovementComponent->MaxMomentum);
+        
+        if (MovementComponent->bIsWallRunning)
+        {
+            DebugInfo += FString::Printf(TEXT("\nWall Run Time: %.1f / %.1f"), 
+                MovementComponent->WallRunTimeRemaining, MovementComponent->MaxWallRunTime);
+        }
+    }
+    
+    DebugInfo += FString::Printf(TEXT("\nForward Input: %.2f"), ForwardInputValue);
+    DebugInfo += FString::Printf(TEXT("\nRight Input: %.2f"), RightInputValue);
+    
+    return DebugInfo;
+}
+
+void ARMCCharacter::DrawDebugHelpers(float Duration)
+{
+    if (!bDebugModeEnabled)
+    {
+        return;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Draw character forward direction
+    DrawDebugLine(
+        World,
+        GetActorLocation(),
+        GetActorLocation() + GetActorForwardVector() * 100.0f,
+        FColor::Yellow,
+        false,
+        Duration,
+        0,
+        2.0f
+    );
+    
+    // Draw character right direction
+    DrawDebugLine(
+        World,
+        GetActorLocation(),
+        GetActorLocation() + GetActorRightVector() * 100.0f,
+        FColor::Purple,
+        false,
+        Duration,
+        0,
+        2.0f
+    );
+    
+    // Draw debug info text
+    DrawDebugString(
+        World,
+        GetActorLocation() + FVector(0, 0, 150),
+        GetDebugInfo(),
+        nullptr,
+        FColor::White,
+        Duration
+    );
+    
+    // If wall running, enhance it if enabled
+    URMCMovementComponent* MovementComponent = GetRMCMovementComponent();
+    if (MovementComponent && MovementComponent->bIsWallRunning && bEnhanceWallRunning)
+    {
+        EnhanceWallRunning(WallRunSpeedMultiplier);
+    }
+    
+    // Call movement component debug drawing
+    if (MovementComponent)
+    {
+        MovementComponent->DrawWallRunDebugHelpers(Duration);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Camera control functions
+
+void ARMCCharacter::UpdateCameraDuringWallRun(float DeltaTime)
+{
+	if (bIsWallRunningLeft || bIsWallRunningRight)
 	{
-		// Broadcast damage event through the event system
-		if (EventSystem)
-		{
-			FGameEventData EventData;
-			EventData.EventType = EGameEventType::PlayerDamaged;
-			EventData.Instigator = DamageCauser;
-			EventData.Target = this;
-			EventData.FloatValue = ActualDamage;
-			EventSystem->BroadcastEvent(EventData);
-		}
+		// Calculate target roll based on which side we're wall running on
+		float TargetRoll = bIsWallRunningLeft ? -WallRunCameraTilt : WallRunCameraTilt;
 		
-		// For backward compatibility, also call the direct methods
-		// These will eventually be removed once all components are updated to use the event system
-		if (StyleComponent)
-		{
-			StyleComponent->TakeDamage(ActualDamage);
-		}
-
-		if (MomentumComponent)
-		{
-			MomentumComponent->OnTakeDamage(ActualDamage);
-		}
+		// Smoothly interpolate to the target roll
+		FRotator CurrentRotation = FollowCamera->GetRelativeRotation();
+		FRotator TargetRotation = FRotator(CurrentRotation.Pitch, CurrentRotation.Yaw, TargetRoll);
+		FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, WallRunCameraTiltSpeed);
+		
+		FollowCamera->SetRelativeRotation(NewRotation);
 	}
+}
 
-	return ActualDamage;
+void ARMCCharacter::UpdateCameraDuringSlide(float DeltaTime)
+{
+	// Lower the camera during slide
+	FVector CurrentLocation = FollowCamera->GetRelativeLocation();
+	FVector TargetLocation = FVector(CurrentLocation.X, CurrentLocation.Y, -SlideCameraLowerOffset);
+	FVector NewLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, SlideCameraSpeed);
+	
+	FollowCamera->SetRelativeLocation(NewLocation);
+
+	// Reset any roll from wall running
+	FRotator CurrentRotation = FollowCamera->GetRelativeRotation();
+	FRotator TargetRotation = FRotator(CurrentRotation.Pitch, CurrentRotation.Yaw, 0.0f);
+	FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, WallRunCameraTiltSpeed);
+	
+	FollowCamera->SetRelativeRotation(NewRotation);
+}
+
+void ARMCCharacter::ResetCameraToDefault(float DeltaTime)
+{
+	// Reset camera location
+	FVector CurrentLocation = FollowCamera->GetRelativeLocation();
+	FVector NewLocation = FMath::VInterpTo(CurrentLocation, DefaultCameraLocation, DeltaTime, SlideCameraSpeed);
+	FollowCamera->SetRelativeLocation(NewLocation);
+
+	// Reset camera rotation
+	FRotator CurrentRotation = FollowCamera->GetRelativeRotation();
+	FRotator NewRotation = FMath::RInterpTo(CurrentRotation, DefaultCameraRotation, DeltaTime, WallRunCameraTiltSpeed);
+	FollowCamera->SetRelativeRotation(NewRotation);
 }
